@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Multi WebRTC MQTT Voice Chat</title>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+<style>
+body{
+    font-family:sans-serif;
+    margin:40px;
+}
+input,button{
+    padding:8px;
+    margin:5px;
+}
+#log{
+    width:100%;
+    height:250px;
+}
+</style>
+
+</head>
+
+<body>
+
+<h2>WebRTC + MQTT 多人数音声通話</h2>
+
+自分ID
+<input id="myid" value="alice">
+
+ルーム
+<input id="room" value="room1">
+
+<button id="connect">参加</button>
+
+<textarea id="log" readonly></textarea>
+
+<script>
+
+const log=(msg)=>{
+    const area=document.getElementById("log");
+    area.value+=msg+"\n";
+    area.scrollTop=area.scrollHeight;
+};
+
+
+let mqttClient;
+
+let myId;
+
+let peers={};
+
+let localStream;
+
+
+/*
+  peerごとの接続作成
+*/
+async function createPeer(peerId,initiator=false){
+
+
+    if(peers[peerId])
+        return peers[peerId];
+
+
+    const pc=new RTCPeerConnection({
+
+        iceServers:[
+            {
+                urls:"stun:stun.l.google.com:19302"
+            }
+        ]
+
+    });
+
+
+    peers[peerId]=pc;
+
+
+
+    localStream.getTracks().forEach(track=>{
+
+        pc.addTrack(track,localStream);
+
+    });
+
+
+
+    pc.ontrack=e=>{
+
+        log("音声受信:"+peerId);
+
+        let audio=document.createElement("audio");
+
+        audio.autoplay=true;
+
+        audio.srcObject=e.streams[0];
+
+        document.body.appendChild(audio);
+
+    };
+
+
+
+    pc.onicecandidate=e=>{
+
+        if(e.candidate){
+
+            sendSignal(peerId,{
+
+                type:"candidate",
+
+                candidate:e.candidate
+
+            });
+
+        }
+
+    };
+
+
+
+    if(initiator){
+
+        const offer=await pc.createOffer();
+
+        await pc.setLocalDescription(offer);
+
+
+        sendSignal(peerId,{
+
+            type:"offer",
+
+            offer
+
+        });
+
+
+    }
+
+
+    return pc;
+
+}
+
+
+
+/*
+ MQTT送信
+*/
+function sendSignal(to,data){
+
+    const room=document.getElementById("room").value;
+
+
+    mqttClient.publish(
+
+        `webrtc/${room}/${to}`,
+
+        JSON.stringify({
+
+            from:myId,
+
+            ...data
+
+        })
+
+    );
+
+}
+
+
+
+/*
+  参加通知
+*/
+function joinRoom(){
+
+
+    const room=document.getElementById("room").value;
+
+
+    mqttClient.publish(
+
+        `webrtc/${room}/join`,
+
+        JSON.stringify({
+
+            id:myId
+
+        })
+
+    );
+
+
+}
+
+
+
+/*
+ MQTT接続
+*/
+document.getElementById("connect").onclick=async()=>{
+
+
+    myId=document.getElementById("myid").value;
+
+
+    localStream=await navigator.mediaDevices.getUserMedia({
+
+        audio:true
+
+    });
+
+
+
+    mqttClient=mqtt.connect(
+        "wss://broker.emqx.io:8084/mqtt"
+    );
+
+
+
+    mqttClient.on("connect",()=>{
+
+
+        const room=document.getElementById("room").value;
+
+
+        mqttClient.subscribe(
+            `webrtc/${room}/${myId}`
+        );
+
+
+        mqttClient.subscribe(
+            `webrtc/${room}/join`
+        );
+
+
+        log("接続完了");
+
+
+        joinRoom();
+
+
+    });
+
+
+
+    mqttClient.on("message",async(topic,msg)=>{
+
+
+        const data=JSON.parse(msg);
+
+
+
+        /*
+          新規参加者
+        */
+        if(topic.endsWith("/join")){
+
+
+            if(data.id===myId)
+                return;
+
+
+            log(
+              "参加:"+data.id
+            );
+
+
+            await createPeer(
+                data.id,
+                true
+            );
+
+
+            return;
+
+        }
+
+
+
+        const from=data.from;
+
+
+
+        const pc=
+            await createPeer(
+                from,
+                false
+            );
+
+
+
+        switch(data.type){
+
+
+            case "offer":
+
+
+                await pc.setRemoteDescription(
+                    data.offer
+                );
+
+
+                const answer=
+                    await pc.createAnswer();
+
+
+                await pc.setLocalDescription(
+                    answer
+                );
+
+
+                sendSignal(
+                    from,
+                    {
+                        type:"answer",
+                        answer
+                    }
+                );
+
+
+                break;
+
+
+
+            case "answer":
+
+
+                await pc.setRemoteDescription(
+                    data.answer
+                );
+
+                break;
+
+
+
+            case "candidate":
+
+
+                try{
+
+                    await pc.addIceCandidate(
+                        data.candidate
+                    );
+
+                }catch(e){
+
+                    console.log(e);
+
+                }
+
+                break;
+
+
+        }
+
+
+    });
+
+
+};
+
+
+</script>
+
+</body>
+</html>
