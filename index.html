@@ -2,369 +2,852 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Multi WebRTC MQTT Voice Chat</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi WebRTC MQTT Voice & Screen Chat</title>
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-
 <style>
-body{
-    font-family:sans-serif;
-    margin:40px;
-}
-input,button{
-    padding:8px;
-    margin:5px;
-}
-#log{
-    width:100%;
-    height:250px;
-}
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #334155;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --accent: #6366f1;
+    --accent-2: #8b5cf6;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --warn: #f59e0b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at 20% 10%, #1e1b4b 0%, transparent 50%),
+                radial-gradient(circle at 80% 90%, #312e81 0%, transparent 50%),
+                var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+  }
+  .app {
+    width: 100%;
+    max-width: 920px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  header {
+    text-align: center;
+  }
+  header h1 {
+    margin: 0 0 6px;
+    font-size: 28px;
+    font-weight: 800;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 0.5px;
+  }
+  header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid rgba(148,163,184,0.15);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+
+  .join-panel {
+    display: grid;
+    gap: 14px;
+  }
+  .join-panel .row {
+    display: grid;
+    gap: 6px;
+  }
+  .join-panel label {
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .join-panel input {
+    background: var(--panel-2);
+    border: 1px solid rgba(148,163,184,0.2);
+    color: var(--text);
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 15px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .join-panel input:focus {
+    border-color: var(--accent);
+  }
+  .join-btn {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border: none;
+    color: white;
+    padding: 13px 18px;
+    font-size: 15px;
+    font-weight: 700;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: transform .15s, opacity .2s;
+  }
+  .join-btn:hover { transform: translateY(-1px); }
+  .join-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* In-call UI */
+  .call-panel {
+    display: none;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .call-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .call-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .call-info .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 4px rgba(34,197,94,0.2);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: .4; }
+  }
+  .clock {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .room-badge {
+    background: var(--panel-2);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    border: 1px solid rgba(148,163,184,0.2);
+  }
+  .room-badge b { color: var(--accent-2); }
+
+  .controls {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .ctrl {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel-2);
+    border: 1px solid rgba(148,163,184,0.18);
+    color: var(--text);
+    padding: 11px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .18s;
+    user-select: none;
+  }
+  .ctrl:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .ctrl.active { background: var(--danger); border-color: var(--danger); color: white; }
+  .ctrl.share.active { background: var(--warn); border-color: var(--warn); color: #1e293b; }
+  .ctrl.leave { background: var(--danger); border-color: var(--danger); }
+  .ctrl:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+  .peers {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .peer-card {
+    position: relative;
+    background: var(--panel-2);
+    border-radius: 12px;
+    overflow: hidden;
+    min-height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(148,163,184,0.15);
+    transition: border-color .2s;
+  }
+  .peer-card.speaking { border-color: var(--success); box-shadow: 0 0 0 2px rgba(34,197,94,0.4); }
+  .peer-card video, .peer-card .screen-video {
+    width: 100%;
+    height: 100%;
+    max-height: 260px;
+    object-fit: contain;
+    background: #000;
+    display: block;
+  }
+  .peer-avatar {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 800;
+    color: white;
+  }
+  .peer-label {
+    position: absolute;
+    bottom: 6px;
+    left: 8px;
+    background: rgba(0,0,0,0.55);
+    color: white;
+    font-size: 12px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: calc(100% - 16px);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .peer-label .mic-icon { font-size: 11px; }
+  .peer-label .mic-off { color: var(--danger); }
+  .peer-label .screen-tag {
+    background: var(--warn);
+    color: #1e293b;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .self-card {
+    border-style: dashed;
+  }
+
+  .log-box {
+    background: #0b1220;
+    border: 1px solid rgba(148,163,184,0.1);
+    color: var(--muted);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    height: 130px;
+    width: 100%;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .log-box .ok { color: var(--success); }
+  .log-box .err { color: var(--danger); }
+  .log-box .info { color: var(--accent-2); }
+
+  .toast-area {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 9999;
+    pointer-events: none;
+  }
+  .toast {
+    background: rgba(30,41,59,0.95);
+    color: var(--text);
+    padding: 11px 20px;
+    border-radius: 10px;
+    border: 1px solid rgba(148,163,184,0.2);
+    font-size: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    backdrop-filter: blur(6px);
+    animation: toastIn .25s ease;
+  }
+  .toast.error { border-color: var(--danger); }
+  .toast.success { border-color: var(--success); }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* source-collapse */
+  details.source {
+    width: 100%;
+    max-width: 920px;
+    margin-top: 6px;
+    background: var(--panel);
+    border: 1px solid rgba(148,163,184,0.15);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  details.source summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--text);
+    user-select: none;
+  }
+  details.source summary::-webkit-details-marker { display: none; }
+  details.source summary .title {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 600;
+  }
+  details.source summary .hint { color: var(--muted); font-size: 12px; }
+  .copy-btn {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border: none;
+    color: white;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform .15s;
+  }
+  .copy-btn:hover { transform: scale(1.05); }
+  details.source pre {
+    margin: 0;
+    padding: 16px;
+    max-height: 380px;
+    overflow: auto;
+    background: #0b1220;
+    color: #e2e8f0;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 8px;
+  }
 </style>
-
 </head>
-
 <body>
 
-<h2>WebRTC + MQTT 多人数音声通話</h2>
+<div class="toast-area" id="toastArea"></div>
 
-自分ID
-<input id="myid" value="alice">
+<div class="app">
+  <header>
+    <h1>🎙️ WebRTC + MQTT 音声・画面共有チャット</h1>
+    <p>MQTT シグナリング経由で複数人と音声通話＆画面共有。ブラウザ1ファイルで完結。</p>
+  </header>
 
-ルーム
-<input id="room" value="room1">
+  <!-- JOIN -->
+  <div class="panel join-panel" id="joinPanel">
+    <div class="row">
+      <label>ユーザーID</label>
+      <input id="myid" placeholder="お名前 or ID" autocomplete="off">
+    </div>
+    <div class="row">
+      <label>ルーム名</label>
+      <input id="room" placeholder="room1" autocomplete="off">
+    </div>
+    <button class="join-btn" id="connect">参加する</button>
+  </div>
 
-<button id="connect">参加</button>
+  <!-- CALL -->
+  <div class="panel call-panel" id="callPanel">
+    <div class="call-header">
+      <div class="call-info">
+        <span class="dot"></span>
+        <span>通話中</span>
+        <span class="clock" id="clock">00:00</span>
+      </div>
+      <div class="room-badge">ルーム: <b id="roomName"></b></div>
+    </div>
 
-<textarea id="log" readonly></textarea>
+    <div class="peers" id="peers"></div>
+
+    <div class="controls">
+      <button class="ctrl mic" id="micBtn" title="マイク ON/OFF">
+        <span id="micIcon">🎤</span><span id="micText">マイクON</span>
+      </button>
+      <button class="ctrl share" id="shareBtn" title="画面共有">
+        <span>🖥️</span><span id="shareText">画面共有</span>
+      </button>
+      <button class="ctrl leave" id="leaveBtn" title="退出">📞 終了</button>
+    </div>
+
+    <textarea class="log-box" id="log" readonly></textarea>
+  </div>
+
+  <footer>
+    STUN: stun.l.google.com:19302 ／ BROKER: broker.emqx.io ／ 通信はP2P
+  </footer>
+</div>
+
+<!-- SOURCE VIEWER -->
+<details class="source">
+  <summary>
+    <span class="title">📋 このページのソースコード</span>
+    <span><button class="copy-btn" id="copySrcBtn" type="button">コピー</button></span>
+    <span class="hint">ワンクリックで全コードをコピー</span>
+  </summary>
+  <pre id="sourceView"></pre>
+</details>
 
 <script>
+/* ============================================================
+   Multi WebRTC + MQTT Voice & Screen Chat
+   - 音声通話 (getUserMedia)
+   - 画面共有 (getDisplayMedia)
+   - MQTTシグナリング (broker.emqx.io)
+   ============================================================ */
 
-const log=(msg)=>{
-    const area=document.getElementById("log");
-    area.value+=msg+"\n";
-    area.scrollTop=area.scrollHeight;
+const $ = id => document.getElementById(id);
+const logBox = $('log');
+const log = (msg, type='') => {
+  const line = document.createElement('div');
+  line.className = type;
+  line.textContent = msg;
+  logBox.appendChild(line);
+  logBox.scrollTop = logBox.scrollHeight;
 };
 
+const toast = (msg, type='') => {
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  $('toastArea').appendChild(el);
+  setTimeout(() => { el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); }, 2600);
+};
 
-let mqttClient;
+let mqttClient, myId, room;
+let peers = {};          // peerId -> { pc, audioEl, containers, screenSenderId }
+let localStream = null;  // 音声
+let screenStream = null; // 画面共有
+let micOn = true;
+let sharing = false;
+let clockTimer = null;
+let callStart = 0;
 
-let myId;
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
-let peers={};
+/* ---------- UI render ---------- */
+function renderPeers(){
+  const wrap = $('peers');
+  wrap.innerHTML = '';
+  // self
+  wrap.appendChild(buildSelfCard());
+  Object.keys(peers).forEach(pid => wrap.appendChild(buildPeerCard(pid)));
+}
 
-let localStream;
+function buildSelfCard(){
+  const card = document.createElement('div');
+  card.className = 'peer-card self-card';
+  const avatar = document.createElement('div');
+  avatar.className = 'peer-avatar';
+  avatar.textContent = (myId||'?').slice(0,1).toUpperCase();
+  const label = document.createElement('div');
+  label.className = 'peer-label';
+  label.textContent = (myId||'') + ' (あなた)';
+  if(!micOn){ const m=document.createElement('span'); m.className='mic-icon mic-off'; m.textContent='🔇'; label.appendChild(m); }
+  card.appendChild(avatar);
+  card.appendChild(label);
+  return card;
+}
 
+function buildPeerCard(peerId){
+  const p = peers[peerId];
+  const card = document.createElement('div');
+  card.className = 'peer-card';
+  card.dataset.peer = peerId;
 
-/*
-  peerごとの接続作成
-*/
-async function createPeer(peerId,initiator=false){
+  // avatar default
+  const avatar = document.createElement('div');
+  avatar.className = 'peer-avatar';
+  avatar.textContent = (peerId||'?').slice(0,1).toUpperCase();
+  if(p.audioEl && p.audioEl.parentElement) p.audioEl.remove();
+  // audio element (hidden)
+  const audio = document.createElement('audio');
+  audio.autoplay = true;
+  audio.playsInline = true;
+  if(p.remoteAudio){ audio.srcObject = p.remoteAudio; }
+  p.audioEl = audio;
+  document.body.appendChild(audio);
 
+  card.appendChild(avatar);
+  const label = document.createElement('div');
+  label.className = 'peer-label';
+  label.textContent = peerId || '';
+  card.appendChild(label);
+  return card;
+}
 
-    if(peers[peerId])
-        return peers[peerId];
+function attachScreenVideo(peerId){
+  const p = peers[peerId];
+  if(!p) return;
+  const card = document.querySelector(`.peer-card[data-peer="${cssEscape(peerId)}"]`);
+  if(!card) return;
+  // remove existing avatar
+  card.innerHTML = '';
+  const v = document.createElement('video');
+  v.className = 'screen-video';
+  v.srcObject = p.remoteScreen;
+  v.autoplay = true; v.playsInline = true; v.muted = true;
+  card.appendChild(v);
+  const label = document.createElement('div');
+  label.className = 'peer-label';
+  label.textContent = peerId || '';
+  const tag = document.createElement('span'); tag.className='screen-tag'; tag.textContent='画面';
+  label.appendChild(tag);
+  card.appendChild(label);
+}
 
+function removeScreenVideo(peerId){
+  const p = peers[peerId];
+  if(!p) return;
+  p.remoteScreen = null;
+  const card = document.querySelector(`.peer-card[data-peer="${cssEscape(peerId)}"]`);
+  if(!card) return;
+  renderPeers(); // rebuild simple
+}
 
-    const pc=new RTCPeerConnection({
+// minimal css-escape for id selectors
+function cssEscape(s){ return (window.CSS&&CSS.escape)?CSS.escape(s):String(s).replace(/"/g,'\\"'); }
 
-        iceServers:[
-            {
-                urls:"stun:stun.l.google.com:19302"
-            }
-        ]
+/* ---------- Speaking detection ---------- */
+function watchSpeaking(){
+  if(!localStream) return;
+  const ctx = new (window.AudioContext||window.webkitAudioContext)();
+  const src = ctx.createMediaStreamSource(localStream);
+  const an = ctx.createAnalyser();
+  an.fftSize = 512;
+  src.connect(an);
+  const data = new Uint8Array(an.frequencyBinCount);
+  const tick = () => {
+    an.getByteFrequencyData(data);
+    let sum=0; for(let i=0;i<data.length;i++) sum+=data[i];
+    const avg = sum/data.length;
+    const card = document.querySelector('.peer-card.self-card');
+    if(card){ card.classList.toggle('speaking', avg>12 && micOn); }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
 
-    });
+/* ---------- Peer connection ---------- */
+async function createPeer(peerId, initiator=false){
+  if(peers[peerId] && peers[peerId].pc) return peers[peerId].pc;
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const p = { pc, remoteAudio:null, remoteScreen:null, screenSenderId:null, audioEl:null };
+  peers[peerId] = p;
 
+  // add local audio tracks
+  if(localStream){
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
 
-    peers[peerId]=pc;
-
-
-
-    localStream.getTracks().forEach(track=>{
-
-        pc.addTrack(track,localStream);
-
-    });
-
-
-
-    pc.ontrack=e=>{
-
-        log("音声受信:"+peerId);
-
-        let audio=document.createElement("audio");
-
-        audio.autoplay=true;
-
-        audio.srcObject=e.streams[0];
-
-        document.body.appendChild(audio);
-
-    };
-
-
-
-    pc.onicecandidate=e=>{
-
-        if(e.candidate){
-
-            sendSignal(peerId,{
-
-                type:"candidate",
-
-                candidate:e.candidate
-
-            });
-
-        }
-
-    };
-
-
-
-    if(initiator){
-
-        const offer=await pc.createOffer();
-
-        await pc.setLocalDescription(offer);
-
-
-        sendSignal(peerId,{
-
-            type:"offer",
-
-            offer
-
-        });
-
-
+  pc.ontrack = e => {
+    // if track kind is video -> screen
+    const stream = e.streams[0];
+    if(e.track.kind === 'video'){
+      p.remoteScreen = stream;
+      attachScreenVideo(peerId);
+    } else {
+      p.remoteAudio = stream;
+      if(p.audioEl) p.audioEl.srcObject = stream;
     }
+    log('受信: ['+e.track.kind+'] from '+peerId, 'info');
+  };
 
+  pc.onicecandidate = e => {
+    if(e.candidate){
+      sendSignal(peerId, { type:'candidate', candidate:e.candidate });
+    }
+  };
 
-    return pc;
+  pc.onnegotiationneeded = async () => {
+    // when a screen track is added, we need to renegotiate
+    if(pc.signalingState === 'stable'){
+      try{
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        sendSignal(peerId, { type:'offer', offer });
+      }catch(err){ console.warn('renegotiate failed', err); }
+    }
+  };
 
+  // when peer adds video (screen) we need to re-offer if we are the offerer side
+  if(initiator){
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    sendSignal(peerId, { type:'offer', offer });
+  }
+
+  renderPeers();
+  return pc;
 }
 
-
-
-/*
- MQTT送信
-*/
-function sendSignal(to,data){
-
-    const room=document.getElementById("room").value;
-
-
-    mqttClient.publish(
-
-        `webrtc/${room}/${to}`,
-
-        JSON.stringify({
-
-            from:myId,
-
-            ...data
-
-        })
-
-    );
-
+function removePeer(peerId){
+  const p = peers[peerId];
+  if(!p) return;
+  try{ p.pc.close(); }catch(e){}
+  if(p.audioEl && p.audioEl.parentElement) p.audioEl.remove();
+  delete peers[peerId];
+  renderPeers();
+  log('切断: '+peerId, 'err');
 }
 
+/* ---------- Signaling ---------- */
+function sendSignal(to, data){
+  if(!mqttClient) return;
+  mqttClient.publish(`webrtc/${room}/${to}`, JSON.stringify({ from: myId, ...data }));
+}
 
+function broadcastLeave(){
+  if(!mqttClient) return;
+  mqttClient.publish(`webrtc/${room}/leave`, JSON.stringify({ id: myId }));
+}
 
-/*
-  参加通知
-*/
 function joinRoom(){
-
-
-    const room=document.getElementById("room").value;
-
-
-    mqttClient.publish(
-
-        `webrtc/${room}/join`,
-
-        JSON.stringify({
-
-            id:myId
-
-        })
-
-    );
-
-
+  mqttClient.publish(`webrtc/${room}/join`, JSON.stringify({ id: myId }));
 }
 
+/* ---------- Message handler ---------- */
+async function onMessage(topic, msg){
+  let data; try{ data = JSON.parse(msg); }catch(e){ return; }
 
+  if(topic.endsWith('/join')){
+    if(data.id === myId) return;
+    log('参加: '+data.id, 'info');
+    // make sure I have local audio before creating offer
+    if(!localStream){ await ensureAudio(); }
+    await createPeer(data.id, true);
+    return;
+  }
 
-/*
- MQTT接続
-*/
-document.getElementById("connect").onclick=async()=>{
+  if(topic.endsWith('/leave')){
+    if(data.id === myId) return;
+    removePeer(data.id);
+    return;
+  }
 
+  const from = data.from;
+  if(!from || from === myId) return;
 
-    myId=document.getElementById("myid").value;
+  const pc = await createPeer(from, false);
 
+  switch(data.type){
+    case 'offer':
+      await pc.setRemoteDescription(data.offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      sendSignal(from, { type:'answer', answer });
+      break;
+    case 'answer':
+      await pc.setRemoteDescription(data.answer);
+      break;
+    case 'candidate':
+      try{ await pc.addIceCandidate(data.candidate); }catch(e){ console.log(e); }
+      break;
+  }
+}
 
-    localStream=await navigator.mediaDevices.getUserMedia({
+/* ---------- Audio/Screen setup ---------- */
+async function ensureAudio(){
+  if(localStream) return localStream;
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({ audio:true, video:false });
+    updateMicButton();
+    watchSpeaking();
+    return localStream;
+  }catch(err){
+    toast('マイクにアクセスできません', 'error');
+    log('マイク取得失敗: '+err.message, 'err');
+    throw err;
+  }
+}
 
-        audio:true
+async function startScreenShare(){
+  try{
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
+    sharing = true;
+    updateShareButton();
 
+    // add to every peer
+    Object.keys(peers).forEach(pid => {
+      const p = peers[pid];
+      const sender = screenStream.getVideoTracks()[0]
+        ? p.pc.addTrack(screenStream.getVideoTracks()[0], screenStream)
+        : null;
+      p.screenSenderId = sender ? sender.id : null;
     });
 
-
-
-    mqttClient=mqtt.connect(
-        "wss://broker.emqx.io:8084/mqtt"
-    );
-
-
-
-    mqttClient.on("connect",()=>{
-
-
-        const room=document.getElementById("room").value;
-
-
-        mqttClient.subscribe(
-            `webrtc/${room}/${myId}`
-        );
-
-
-        mqttClient.subscribe(
-            `webrtc/${room}/join`
-        );
-
-
-        log("接続完了");
-
-
-        joinRoom();
-
-
-    });
-
-
-
-    mqttClient.on("message",async(topic,msg)=>{
-
-
-        const data=JSON.parse(msg);
-
-
-
-        /*
-          新規参加者
-        */
-        if(topic.endsWith("/join")){
-
-
-            if(data.id===myId)
-                return;
-
-
-            log(
-              "参加:"+data.id
-            );
-
-
-            await createPeer(
-                data.id,
-                true
-            );
-
-
-            return;
-
-        }
-
-
-
-        const from=data.from;
-
-
-
-        const pc=
-            await createPeer(
-                from,
-                false
-            );
-
-
-
-        switch(data.type){
-
-
-            case "offer":
-
-
-                await pc.setRemoteDescription(
-                    data.offer
-                );
-
-
-                const answer=
-                    await pc.createAnswer();
-
-
-                await pc.setLocalDescription(
-                    answer
-                );
-
-
-                sendSignal(
-                    from,
-                    {
-                        type:"answer",
-                        answer
-                    }
-                );
-
-
-                break;
-
-
-
-            case "answer":
-
-
-                await pc.setRemoteDescription(
-                    data.answer
-                );
-
-                break;
-
-
-
-            case "candidate":
-
-
-                try{
-
-                    await pc.addIceCandidate(
-                        data.candidate
-                    );
-
-                }catch(e){
-
-                    console.log(e);
-
-                }
-
-                break;
-
-
-        }
-
-
-    });
-
-
+    screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
+    toast('画面共有を開始しました', 'success');
+    log('画面共有: 開始', 'info');
+  }catch(err){
+    sharing = false;
+    updateShareButton();
+    if(err.name !== 'NotAllowedError') toast('画面共有に失敗しました', 'error');
+    log('画面共有失敗: '+err.message, 'err');
+  }
+}
+
+function stopScreenShare(){
+  if(!screenStream) return;
+  screenStream.getTracks().forEach(t => t.stop());
+  screenStream = null;
+  sharing = false;
+  updateShareButton();
+
+  // remove senders
+  Object.keys(peers).forEach(pid => {
+    const p = peers[pid];
+    if(p.screenSenderId){
+      const senders = p.pc.getSenders();
+      const s = senders.find(x => x.id === p.screenSenderId);
+      if(s) p.pc.removeTrack(s);
+      p.screenSenderId = null;
+    }
+  });
+  toast('画面共有を終了しました');
+  log('画面共有: 終了', 'info');
+}
+
+/* ---------- Controls ---------- */
+function updateMicButton(){
+  $('micIcon').textContent = micOn ? '🎤' : '🔇';
+  $('micText').textContent = micOn ? 'マイクON' : 'マイクOFF';
+  $('micBtn').classList.toggle('active', !micOn);
+}
+function updateShareButton(){
+  $('shareText').textContent = sharing ? '共有停止' : '画面共有';
+  $('shareBtn').classList.toggle('active', sharing);
+}
+
+function toggleMic(){
+  if(!localStream) return;
+  micOn = !micOn;
+  localStream.getAudioTracks().forEach(t => t.enabled = micOn);
+  updateMicButton();
+  renderPeers();
+  log(micOn ? 'マイクON' : 'マイクOFF', 'info');
+}
+
+function toggleShare(){
+  sharing ? stopScreenShare() : startScreenShare();
+}
+
+/* ---------- Clock ---------- */
+function startClock(){
+  callStart = Date.now();
+  $('clock').textContent = '00:00';
+  clockTimer = setInterval(() => {
+    const s = Math.floor((Date.now()-callStart)/1000);
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    $('clock').textContent = mm+':'+ss;
+  }, 1000);
+}
+function stopClock(){ if(clockTimer){ clearInterval(clockTimer); clockTimer=null; } }
+
+/* ---------- Lifecycle ---------- */
+function showCallUI(){
+  $('joinPanel').style.display = 'none';
+  $('callPanel').style.display = 'flex';
+  $('roomName').textContent = room;
+  startClock();
+  renderPeers();
+}
+function showJoinUI(){
+  stopClock();
+  $('callPanel').style.display = 'none';
+  $('joinPanel').style.display = 'grid';
+}
+
+async function connect(){
+  myId = ($('myid').value || 'guest-'+Math.random().toString(36).slice(2,6)).trim();
+  room = ($('room').value || 'room1').trim();
+  $('connect').disabled = true;
+
+  await ensureAudio();
+
+  mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+  mqttClient.on('connect', () => {
+    log('MQTT接続完了', 'ok');
+    mqttClient.subscribe(`webrtc/${room}/${myId}`);
+    mqttClient.subscribe(`webrtc/${room}/join`);
+    mqttClient.subscribe(`webrtc/${room}/leave`);
+    showCallUI();
+    joinRoom();
+  });
+  mqttClient.on('message', onMessage);
+  mqttClient.on('error', e => log('MQTTエラー: '+e, 'err'));
+  mqttClient.on('close', () => log('MQTT切断', 'err'));
+}
+
+function leave(){
+  broadcastLeave();
+  Object.keys(peers).forEach(removePeer);
+  if(screenStream) stopScreenShare();
+  if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null; }
+  if(mqttClient){ try{ mqttClient.end(true); }catch(e){} mqttClient=null; }
+  micOn = true; sharing = false;
+  showJoinUI();
+  $('connect').disabled = false;
+  log('通話を終了しました', 'info');
+}
+
+/* ---------- Events ---------- */
+$('connect').onclick = connect;
+$('micBtn').onclick = toggleMic;
+$('shareBtn').onclick = toggleShare;
+$('leaveBtn').onclick = leave;
+window.addEventListener('beforeunload', () => { broadcastLeave(); });
+
+/* ---------- Source viewer / copy ---------- */
+function showSource(){
+  fetch(location.href).then(r=>r.text()).then(txt => {
+    $('sourceView').textContent = txt;
+  }).catch(()=>{ $('sourceView').textContent = '<!doctype html>... (取得できませんでした。ページを「名前を付けて保存」してください)'; });
+}
+$('copySrcBtn').onclick = async (e) => {
+  e.preventDefault();
+  try{
+    const txt = $('sourceView').textContent || await fetch(location.href).then(r=>r.text());
+    await navigator.clipboard.writeText(txt);
+    toast('ソースコードをコピーしました ✅', 'success');
+  }catch(err){
+    toast('コピー失敗: 手動で選択してください', 'error');
+  }
 };
-
-
+$('sourceView').onclick = () => {
+  const r = document.createRange();
+  r.selectNode($('sourceView'));
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(r);
+};
+window.addEventListener('load', showSource);
 </script>
 
 </body>
